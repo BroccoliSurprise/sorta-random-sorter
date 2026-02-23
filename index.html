@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title id="pageTitle">Random Name Selector</title>
+<style>
+    body{
+        font-family: Arial, sans-serif;
+        margin:20px;
+    }
+    #controls{
+        margin-bottom:20px;
+    }
+    button{
+        padding:8px 14px;
+        margin-right:10px;
+        font-size:16px;
+        cursor:pointer;
+    }
+
+    #container{
+        display:flex;
+        gap:40px;
+    }
+
+    .panel{
+        flex:1;
+        min-height:400px;
+        border:1px solid #ccc;
+        padding:15px;
+        border-radius:8px;
+    }
+
+    h2{
+        margin-top:0;
+    }
+
+
+    .glowGreen{
+    box-shadow: 0 0 12px 4px #6cff6c;
+    border-color: #3be33b !important;
+}
+
+    #leftList, #rightList{
+        display:grid;
+        grid-template-columns:1fr;
+        gap:6px;
+        font-size:16px;
+    }
+
+    /* Right side pairs layout */
+    #rightList.pairs{
+        grid-template-columns:1fr 1fr;
+    }
+
+    .nameBox{
+        padding:6px 8px;
+        border:1px solid #eee;
+        border-radius:4px;
+        background:#fafafa;
+        min-height:22px;
+    }
+</style>
+</head>
+
+<body>
+
+<div id="controls">
+    <button id="loadBtn">Load List</button>
+    <button id="sortBtn">Sort</button>
+    <input type="file" id="fileInput" accept=".txt" style="display:none">
+</div>
+
+<div id="container">
+    <div class="panel">
+        <h2>Names List</h2>
+        <div id="leftList"></div>
+    </div>
+
+    <div class="panel">
+        <h2>Sorted Output</h2>
+        <div id="rightList" class="pairs"></div>
+    </div>
+</div>
+
+<script>
+let names = [];
+
+/* ---------------- RULE STORAGE ---------------- */
+let forcedPairs = [];
+let forbiddenPairs = [];
+
+function loadRules(){
+    const stored = localStorage.getItem("pairingRules");
+
+    if(stored){
+        const parsed = JSON.parse(stored);
+        forcedPairs = parsed.forced || [];
+        forbiddenPairs = parsed.forbidden || [];
+        setTitleItalic(true);
+    }
+}
+loadRules();
+
+function setTitleItalic(isCustom){
+    const title = document.getElementById("pageTitle");
+    title.style.fontStyle = isCustom ? "italic" : "normal";
+}
+
+/* ---------------- DOM ---------------- */
+const loadBtn = document.getElementById("loadBtn");
+const sortBtn = document.getElementById("sortBtn");
+const fileInput = document.getElementById("fileInput");
+const leftList = document.getElementById("leftList");
+const rightList = document.getElementById("rightList");
+
+loadBtn.onclick = () => fileInput.click();
+
+/* ---------------- NAME FILE LOADER ---------------- */
+fileInput.onchange = e=>{
+    const file=e.target.files[0];
+    if(!file) return;
+
+    const reader=new FileReader();
+
+    reader.onload=evt=>{
+        names = evt.target.result
+            .split(/\r?\n/)
+            .map(n=>n.trim())
+            .filter(n=>n)
+            .slice(0,40);
+
+        renderLeft();
+    };
+
+    reader.readAsText(file);
+};
+
+function renderLeft(){
+    leftList.innerHTML="";
+
+    names.forEach(name=>{
+        const div=document.createElement("div");
+        div.className="nameBox leftName";
+        div.textContent=name;
+        leftList.appendChild(div);
+    });
+}
+
+/* ---------------- UTIL ---------------- */
+
+function shuffle(arr){
+    for(let i=arr.length-1;i>0;i--){
+        const j=Math.floor(Math.random()*(i+1));
+        [arr[i],arr[j]]=[arr[j],arr[i]];
+    }
+}
+
+function isForbidden(a,b){
+    return forbiddenPairs.some(f =>
+        (f[0]===a && f[1]===b) ||
+        (f[0]===b && f[1]===a)
+    );
+}
+
+/* ---------------- PAIR GENERATOR ---------------- */
+
+function generatePairs(){
+
+    const used=new Set();
+    const pairs=[];
+
+    /* Forced pairs first */
+    for(const [a,b] of forcedPairs){
+
+        if(a>=names.length || b>=names.length) continue;
+
+        if(isForbidden(a,b)) continue;
+
+        used.add(a);
+        used.add(b);
+
+        pairs.push([a,b]);
+    }
+
+    /* Build pool */
+    const pool=[];
+    for(let i=0;i<names.length;i++){
+        if(!used.has(i)) pool.push(i);
+    }
+
+    shuffle(pool);
+
+    const MAX_TRIES=200;
+    let leftover=null;
+
+    for(let attempt=0; attempt<MAX_TRIES; attempt++){
+
+        const tempPairs=[...pairs];
+
+        let valid=true;
+
+        for(let i=0;i+1<pool.length;i+=2){
+
+            const a=pool[i];
+            const b=pool[i+1];
+
+            if(isForbidden(a,b)){
+                valid=false;
+                break;
+            }
+
+            tempPairs.push([a,b]);
+        }
+
+        if(pool.length%2===1){
+            leftover=pool[pool.length-1];
+        }
+
+        if(!valid) continue;
+
+        return {pairs:tempPairs, leftover};
+    }
+
+    alert("Could not resolve constraints.");
+    return {pairs:[], leftover:null};
+}
+
+/* ---------------- ANIMATION ---------------- */
+
+
+function clearGlow(){
+    document.querySelectorAll(".glowGreen")
+        .forEach(el=>el.classList.remove("glowGreen"));
+}
+
+
+async function animateSort(){
+
+    clearGlow();
+
+    rightList.innerHTML="";
+
+    const result = generatePairs();
+    let pairs = result.pairs;
+    const leftover = result.leftover;
+
+    if(pairs.length===0) return;
+
+    const leftBoxes = document.querySelectorAll(".leftName");
+
+    /* --------------------------
+       Handle leftover pairing
+    -------------------------- */
+
+    if(leftover !== null){
+
+        const candidatePairIndexes = [];
+
+        pairs.forEach((pair,idx)=>{
+            if(pair.includes(leftover)) return;
+
+            if(!isForbidden(pair[0], leftover) &&
+               !isForbidden(pair[1], leftover)){
+                candidatePairIndexes.push(idx);
+            }
+        });
+
+        if(candidatePairIndexes.length > 0){
+
+            const chosenPairIndex =
+                candidatePairIndexes[
+                    Math.floor(Math.random()*candidatePairIndexes.length)
+                ];
+
+            pairs[chosenPairIndex].push(leftover);
+        }
+    }
+
+    /* --------------------------
+       Flatten layout (RIGHT SIDE ORDER)
+    -------------------------- */
+
+ const layout = [];
+
+pairs.forEach((pair, pairIndex)=>{
+    pair.forEach(idx=>{
+        layout.push({
+            index: idx,
+            name: names[idx],
+            pairIndex: pairIndex    
+        });
+    });
+});
+
+    /* --------------------------
+       Create RIGHT side slots
+    -------------------------- */
+
+    rightList.innerHTML="";
+
+    for(let i=0;i<layout.length;i++){
+        const div=document.createElement("div");
+        div.className="nameBox";
+        rightList.appendChild(div);
+    }
+
+    const rightBoxes = Array.from(rightList.children);
+
+    /* --------------------------
+       Select ONE pair to glow (RIGHT SIDE ONLY)
+    -------------------------- */
+
+    const glowPairIndex =
+        pairs.length > 0
+        ? Math.floor(Math.random() * pairs.length)
+        : -1;
+
+    /* --------------------------
+       Animation reveal
+    -------------------------- */
+
+    const animationOrder = [...Array(layout.length).keys()];
+    shuffle(animationOrder);
+
+    for(const slotIndex of animationOrder){
+
+        const entry = layout[slotIndex];
+        if(!entry) continue;
+
+//        const pairIndex = Math.floor(slotIndex / (layout.length / pairs.length || 1));
+
+        const sourceBox = leftBoxes[entry.index];
+        const targetBox = rightBoxes[slotIndex];
+
+        if(!sourceBox || !targetBox) continue;
+
+        /* ⭐ Glow ONLY on RIGHT side */
+        if(entry.pairIndex === glowPairIndex){
+            targetBox.classList.add("glowGreen");
+        }
+
+        await animateMove(sourceBox, targetBox, entry.name);
+    }
+}
+
+/* ---------------- MOVE ANIMATION ---------------- */
+
+function animateMove(source,target,text){
+
+    return new Promise(resolve=>{
+
+        const clone=source.cloneNode(true);
+
+        const sRect=source.getBoundingClientRect();
+        const tRect=target.getBoundingClientRect();
+
+        clone.style.position="fixed";
+        clone.style.left=sRect.left+"px";
+        clone.style.top=sRect.top+"px";
+        clone.style.width=sRect.width+"px";
+        clone.style.zIndex=1000;
+        clone.style.transition="all 0.6s ease";
+
+        document.body.appendChild(clone);
+
+        requestAnimationFrame(()=>{
+            clone.style.left=tRect.left+"px";
+            clone.style.top=tRect.top+"px";
+        });
+
+        setTimeout(()=>{
+            target.textContent=text;
+            clone.remove();
+            resolve();
+        },650);
+    });
+}
+
+/* ---------------- BUTTON ---------------- */
+
+sortBtn.onclick=()=>animateSort();
+
+/* ---------------- DRAG DROP RULE FILE ---------------- */
+
+document.addEventListener("dragover",e=>e.preventDefault());
+
+document.addEventListener("drop",e=>{
+    e.preventDefault();
+
+    const file=e.dataTransfer.files[0];
+    if(!file || !file.name.endsWith(".txt")){
+        alert("Drop valid rule file.");
+        return;
+    }
+
+    const reader=new FileReader();
+
+    reader.onload=evt=>{
+        const lines=evt.target.result
+            .split(/\r?\n/)
+            .map(l=>l.trim())
+            .filter(l=>l && !l.startsWith("#"));
+
+        const newForced=[];
+        const newForbidden=[];
+
+        for(const line of lines){
+
+            if(line.includes("+")){
+                const [a,b]=line.split("+")
+                    .map(x=>parseInt(x)-1);
+
+                if(!isNaN(a)&&!isNaN(b))
+                    newForced.push([a,b]);
+            }
+
+            if(line.includes("-")){
+                const [a,b]=line.split("-")
+                    .map(x=>parseInt(x)-1);
+
+                if(!isNaN(a)&&!isNaN(b))
+                    newForbidden.push([a,b]);
+            }
+        }
+
+        forcedPairs=newForced;
+        forbiddenPairs=newForbidden;
+
+        localStorage.setItem("pairingRules",JSON.stringify({
+            forced:forcedPairs,
+            forbidden:forbiddenPairs
+        }));
+
+        setTitleItalic(true);
+        alert("Rules loaded.");
+    };
+
+    reader.readAsText(file);
+});
+</script>
+
+</body>
+</html>
