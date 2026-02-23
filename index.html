@@ -10,12 +10,15 @@
     }
     #controls{
         margin-bottom:20px;
+
+        
     }
     button{
         padding:8px 14px;
         margin-right:10px;
         font-size:16px;
         cursor:pointer;
+        transition: font-style 0.3s ease;
     }
 
     #container{
@@ -35,12 +38,12 @@
         margin-top:0;
     }
 
-
+/*
     .glowGreen{
     box-shadow: 0 0 12px 4px #6cff6c;
     border-color: #3be33b !important;
 }
-
+*/
     #leftList, #rightList{
         display:grid;
         grid-template-columns:1fr;
@@ -90,6 +93,18 @@ let names = [];
 let forcedPairs = [];
 let forbiddenPairs = [];
 
+function setRuleVisualIndicator(active){
+
+    const loadBtn = document.getElementById("loadBtn");
+    const sortBtn = document.getElementById("sortBtn");
+
+    const style = active ? "italic" : "normal";
+
+    loadBtn.style.fontStyle = style;
+    sortBtn.style.fontStyle = style;
+}
+
+
 function loadRules(){
     const stored = localStorage.getItem("pairingRules");
 
@@ -99,13 +114,62 @@ function loadRules(){
         forbiddenPairs = parsed.forbidden || [];
         setTitleItalic(true);
     }
+
+    if(forcedPairs.length || forbiddenPairs.length){
+    setRuleVisualIndicator(true);
+}
+else{
+    setRuleVisualIndicator(false);
+}
 }
 loadRules();
+
+
+let longPressTimer = null;
+const LONG_PRESS_DURATION = 1500; // ms
+
+document.addEventListener("keydown", e=>{
+
+    if(e.key.toLowerCase() !== "f") return;
+
+    if(longPressTimer) return;
+
+    longPressTimer = setTimeout(()=>{
+
+        /* --- Discreet rule forget --- */
+
+        localStorage.removeItem("pairingRules");
+
+        forcedPairs = [];
+        forbiddenPairs = [];
+
+        setTitleItalic(false);
+
+        console.log("Rule memory cleared.");
+
+        longPressTimer = null;
+
+    }, LONG_PRESS_DURATION);
+
+});
+
+document.addEventListener("keyup", e=>{
+    if(e.key.toLowerCase() === "f"){
+        if(longPressTimer){
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+        }
+    }
+});
+
 
 function setTitleItalic(isCustom){
     const title = document.getElementById("pageTitle");
     title.style.fontStyle = isCustom ? "italic" : "normal";
 }
+
+
+
 
 /* ---------------- DOM ---------------- */
 const loadBtn = document.getElementById("loadBtn");
@@ -167,63 +231,81 @@ function isForbidden(a,b){
 
 function generatePairs(){
 
-    const used=new Set();
-    const pairs=[];
+    const used = new Set();
+    const basePairs = [];
 
-    /* Forced pairs first */
+    /* ---------- Process forced pairs ---------- */
+
     for(const [a,b] of forcedPairs){
 
-        if(a>=names.length || b>=names.length) continue;
+        if(a >= names.length || b >= names.length)
+            continue;
 
-        if(isForbidden(a,b)) continue;
+        if(isForbidden(a,b))
+            continue;
 
+        basePairs.push([a,b]);
         used.add(a);
         used.add(b);
-
-        pairs.push([a,b]);
     }
 
-    /* Build pool */
-    const pool=[];
+    /* ---------- Build free pool ---------- */
+
+    const pool = [];
     for(let i=0;i<names.length;i++){
-        if(!used.has(i)) pool.push(i);
+        if(!used.has(i))
+            pool.push(i);
     }
 
-    shuffle(pool);
-
-    const MAX_TRIES=200;
-    let leftover=null;
+    const MAX_TRIES = 200;
 
     for(let attempt=0; attempt<MAX_TRIES; attempt++){
 
-        const tempPairs=[...pairs];
+        shuffle(pool);   // Important: reshuffle every attempt
 
-        let valid=true;
+        const poolCopy = [...pool];
+        const tempPairs = [...basePairs];
 
-        for(let i=0;i+1<pool.length;i+=2){
+        let valid = true;
+        let leftover = null;
 
-            const a=pool[i];
-            const b=pool[i+1];
+        /* Pair pool elements */
+
+        while(poolCopy.length >= 2){
+
+            const a = poolCopy.pop();
+            const b = poolCopy.pop();
 
             if(isForbidden(a,b)){
-                valid=false;
+                valid = false;
                 break;
             }
 
             tempPairs.push([a,b]);
         }
 
-        if(pool.length%2===1){
-            leftover=pool[pool.length-1];
+        if(poolCopy.length === 1){
+            leftover = poolCopy[0];
         }
 
-        if(!valid) continue;
-
-        return {pairs:tempPairs, leftover};
+        /* Final validation pass (safety layer) */
+        if(valid && validateAllPairs(tempPairs)){
+            return {pairs: tempPairs, leftover};
+        }
     }
 
     alert("Could not resolve constraints.");
     return {pairs:[], leftover:null};
+}
+
+function validateAllPairs(pairList){
+
+    for(const [a,b] of pairList){
+        if(isForbidden(a,b))
+            return false;
+    }
+
+    return true;
 }
 
 /* ---------------- ANIMATION ---------------- */
